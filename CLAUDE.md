@@ -28,7 +28,7 @@ This is a fork of [C2gl/tududi_addon](https://github.com/C2gl/tududi_addon), use
 
 The addon wraps [chrisvel/tududi](https://github.com/chrisvel/tududi) (a self-hosted task manager) as an HA addon. The upstream repo contains two addon variants, both on `main` branch side by side:
 
-- **`tududi-addon/`** — Production addon, at `v0.89.0` at C2gl.
+- **`tududi-addon/`** — Production addon, at `v0.89.0` at C2gl (PR #71 ports improvements, pending merge).
 - **`tududi-addon-dev/`** — Dev addon, at `0.89.0` at C2gl (PR #70 merged), with simplified Dockerfile and session secret auto-generation.
 
 **woytekbode is a co-maintainer of C2gl/tududi_addon** (granted by C2gl). The user can merge PRs, run the builder workflow, and manage the upstream repo via the GitHub web UI — but the MCP API cannot do these things (see above).
@@ -67,20 +67,35 @@ The addon version in `config.yaml` tracks the upstream tududi version. For addon
 - Port option hidden from UI
 - Published to `ghcr.io/c2gl/tududi-addon-dev:0.89.0`
 
+### PR #71 — Production addon improvements (open, pending merge)
+- Same improvements as PR #70, targeting `tududi-addon/` (production)
+- Version `0.89.1` (addon-level patch, still wraps tududi v0.89.0)
+- Branch: `woytekbode/tududi_addon` → `pr/c2gl-prod-improvements`
+- After merge: run builder with `stable`, image goes to `ghcr.io/c2gl/tududi-addon:0.89.1`
+
 ### chrisvel/tududi#946 — Logo path fix (✅ Merged)
 - Once in a tududi release, remaining logo sed lines can be removed entirely.
+
+## Pending Minor Fixes (follow-up, apply to both addons)
+
+From Copilot reviews on PR #70 and #71. Not blocking, can be done in a single follow-up commit:
+
+1. **Comment mismatch in run.sh**: The comment `# Validate persisted secret (same checks as manual secret above)` is inaccurate — the persisted path also does a hex-format check that the manual path doesn't. Either update the comment or add the hex check to the manual path too.
+
+2. **Silent chmod failure**: `chmod 600 "$SECRET_FILE" 2>/dev/null || true` silently swallows errors. Could log a warning instead: `if ! chmod 600 "$SECRET_FILE" 2>/dev/null; then log_warning "Failed to set permissions on ${SECRET_FILE}"; fi`
 
 ## Planned Roadmap
 
 1. ~~PR #70~~ → ✅ Done.
-2. **Port dev improvements to production addon** → version `0.89.1`, same changes as dev but targeting `tududi-addon/`.
+2. **PR #71 — production improvements** → Merge, run builder with `stable`.
 3. **Bump dev to `1.0.0-dev.2`** → Keep dev ahead of production.
 4. **Migrate builder workflow** → Replace deprecated `home-assistant/builder@master`.
+5. **Minor fixes follow-up** → Address comment mismatch + silent chmod across both addons.
 
 ## Open Items
 
-- Create and merge production PR (v0.89.1) — branch `pr/c2gl-prod-addon-improvements`
-- After merge: run builder with `stable`
+- Merge PR #71, run builder with `stable`
 - Bump dev to `1.0.0-dev.2`
-- Migrate builder workflow
+- Migrate builder workflow to new HA reusable actions
+- Minor fixes follow-up (comment mismatch, silent chmod)
 - Remove logo sed lines when next tududi release includes #946
