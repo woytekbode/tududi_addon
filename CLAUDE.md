@@ -24,9 +24,11 @@ The GitHub MCP connection is authenticated as **woytekbode**. This determines wh
 - Merge PRs on `C2gl/tududi_addon`
 - Trigger GitHub Actions workflows on any repo
 
+**Known issue:** Cross-fork PR creation (`woytekbode:branch` → `C2gl:main`) may fail via MCP even though the API should support it. Workaround: create the branch + commit via MCP, then the user opens the PR manually on GitHub.
+
 **Workflow implications:**
 - All code changes go through the fork → PR to C2gl. Never try to push directly to C2gl.
-- The user must manually: sync the fork with C2gl, merge PRs on C2gl, run builder workflows, edit PR descriptions on C2gl.
+- The user must manually: sync the fork with C2gl, merge PRs on C2gl, run builder workflows, edit PR descriptions on C2gl, and potentially create cross-fork PRs when MCP fails.
 - **The fork's `main` must be synced with C2gl's `main` before creating new PR branches.** If behind, cross-fork PRs will fail. Ask the user to sync: GitHub → woytekbode/tududi_addon → "Sync fork".
 - PR branch naming convention: `pr/c2gl-<description>` for branches intended as PRs to C2gl.
 - **Never push CLAUDE.md or fork-only files to `main`.** They cause the fork to diverge from upstream, breaking future syncs and PR creation.
@@ -84,6 +86,12 @@ The addon version in `config.yaml` tracks the upstream tududi version. For addon
 ### chrisvel/tududi#946 — Logo path fix (✅ Merged)
 - Included in v1.0.0-dev.1 release. Logo sed workaround can now be removed when bumping to this version.
 
+### Bump dev to v1.0.0-dev.1 (🔄 Branch ready, PR needs manual creation)
+- Branch: `pr/c2gl-bump-dev-1.0.0-dev.1` on woytekbode/tududi_addon
+- Changes: version bump, removed logo sed workaround (zero sed!), updated changelog
+- Cross-fork PR creation failed via MCP — user needs to open PR manually on GitHub:
+  Go to https://github.com/C2gl/tududi_addon/compare/main...woytekbode:tududi_addon:pr/c2gl-bump-dev-1.0.0-dev.1
+
 ## Pending Minor Fixes (follow-up, apply to both addons)
 
 From Copilot reviews on PR #70 and #71. Not blocking, can be done in a single follow-up commit:
@@ -96,12 +104,12 @@ From Copilot reviews on PR #70 and #71. Not blocking, can be done in a single fo
 
 1. ~~PR #70~~ → ✅ Done.
 2. ~~PR #71~~ → ✅ Done.
-3. **Bump dev to `1.0.0-dev.1`** → Includes logo fix (#946), so logo sed can be removed entirely (zero sed!). Keep dev ahead of production.
+3. **Bump dev to `1.0.0-dev.1`** → 🔄 Branch ready, PR needs manual creation.
 4. **Migrate builder workflow** → Replace deprecated `home-assistant/builder@master`.
 5. **Minor fixes follow-up** → Address comment mismatch + silent chmod across both addons.
 
 ## Open Items
 
-- Bump dev to `1.0.0-dev.1` (branch ready to create after fork sync)
+- Open cross-fork PR for dev bump to v1.0.0-dev.1 (branch ready)
 - Migrate builder workflow to new HA reusable actions
 - Minor fixes follow-up (comment mismatch, silent chmod)
