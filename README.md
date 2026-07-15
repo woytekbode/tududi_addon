@@ -7,6 +7,11 @@
 # Tududi Home Assistant Add-on Repository
 
 > [!CAUTION]
+> **⚠️ The project is currently stale ⚠️**
+> 
+> Do backup your data and tasks, as breaking issues or releases could happen 
+
+> [!CAUTION]
 > **⚠️ USE WITH CAUTION - UNDER ACTIVE DEVELOPMENT ⚠️**
 > 
 > Do backup your data and tasks, as breaking issues or releases could happen 
