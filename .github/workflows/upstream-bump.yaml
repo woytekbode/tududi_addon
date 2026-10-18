@@ -1,0 +1,167 @@
+# Lives only on the fork's `automation` branch (the fork's default branch), so
+# the fork's `main` stays an exact mirror of C2gl/tududi_addon `main`.
+#
+# Every run:
+#   1. fast-forwards fork `main` to C2gl `main` (never merges, never forces)
+#   2. if chrisvel/tududi has a newer tag than the addon pins, pushes
+#      pr/c2gl-bump-<version> with the mechanical bump and opens a draft PR to C2gl
+#
+# Needs secret FORK_SYNC_PAT: classic PAT of the fork owner, scopes public_repo + workflow.
+name: Upstream bump
+
+on:
+  schedule:
+    - cron: '17 5,11,17 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: only report what would happen (no sync, no branch, no PR)'
+        type: boolean
+        default: false
+      scope:
+        description: 'Which addon(s) to bump (auto: dev follows newest tag, stable newest non-pre-release)'
+        type: choice
+        default: auto
+        options: [auto, dev, stable]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: upstream-bump
+
+env:
+  UPSTREAM_REPO: C2gl/tududi_addon
+  APP_REPO: chrisvel/tududi
+  FORK_REPO: ${{ github.repository }}
+  FORK_OWNER: ${{ github.repository_owner }}
+  DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+  SCOPE: ${{ inputs.scope || 'auto' }}
+  PLAN_FILE: ${{ github.workspace }}/plan.json
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secret
+        env:
+          PAT: ${{ secrets.FORK_SYNC_PAT }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::error::Add a FORK_SYNC_PAT secret (classic PAT, scopes public_repo + workflow)"
+            exit 1
+          fi
+
+      - name: Keep only this workflow active in the fork
+        # The fork also contains C2gl's workflows (CI, issue trackers). Running them
+        # here would rebuild on every sync and fail on disabled fork issues.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PUT "repos/$FORK_REPO/actions/workflows/upstream-bump.yaml/enable"
+          gh api "repos/$FORK_REPO/actions/workflows" --paginate \
+            --jq '.workflows[] | select(.state == "active")
+                  | select(.path | startswith(".github/workflows/"))
+                  | select(.path != ".github/workflows/upstream-bump.yaml") | "\(.id) \(.path)"' |
+          while read -r id path; do
+            echo "Disabling $path"
+            gh api -X PUT "repos/$FORK_REPO/actions/workflows/$id/disable" || true
+          done
+
+      - name: Check out automation scripts
+        uses: actions/checkout@v5
+        with:
+          path: tools
+          sparse-checkout: .github/scripts
+
+      - name: Check out fork main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          path: addon
+          fetch-depth: 0
+          token: ${{ secrets.FORK_SYNC_PAT }}
+
+      - name: Sync fork main with C2gl main
+        working-directory: addon
+        run: |
+          git remote add upstream "https://github.com/$UPSTREAM_REPO.git"
+          git fetch --quiet upstream main
+          ahead=$(git rev-list --count upstream/main..origin/main)
+          behind=$(git rev-list --count origin/main..upstream/main)
+          if [ "$ahead" -gt 0 ]; then
+            echo "::error::Fork main has $ahead commit(s) that are not in C2gl main. Not syncing; fix it on GitHub (Sync fork -> Discard commits)."
+            exit 1
+          fi
+          if [ "$behind" -eq 0 ]; then
+            echo "Fork main is already in sync ($(git rev-parse --short HEAD))."
+          elif [ "$DRY_RUN" = true ]; then
+            echo "Dry run: would fast-forward fork main by $behind commit(s)."
+          else
+            git push origin refs/remotes/upstream/main:refs/heads/main
+            echo "Fast-forwarded fork main by $behind commit(s) to $(git rev-parse --short upstream/main)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          git checkout --quiet -B work upstream/main
+
+      - name: Plan bump
+        id: plan
+        run: |
+          python3 -m pip install --quiet --break-system-packages awesomeversion \
+            || echo "::warning::awesomeversion not installed; skipping HA version-order check"
+          python3 tools/.github/scripts/upstream_bump.py plan --repo addon --scope "$SCOPE" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if a bump PR is already open or the branch exists
+        id: guard
+        if: steps.plan.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_PAT }}
+          BRANCH: ${{ steps.plan.outputs.branch }}
+        run: |
+          open=$(gh pr list -R "$UPSTREAM_REPO" --state open --author "$FORK_OWNER" --json number,headRefName \
+            --jq '[.[] | select(.headRefName | test("^pr/c2gl-(bump|promote)"))][0].number // empty')
+          if [ -n "$open" ]; then
+            echo "Bump PR #$open is still open; not opening another. Merge or close it first." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif git -C addon ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+            echo "Branch $BRANCH already exists on the fork; delete it to have it recreated." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create branch and draft PR
+        if: steps.plan.outputs.needed == 'true' && steps.guard.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_PAT }}
+          BRANCH: ${{ steps.plan.outputs.branch }}
+          TITLE: ${{ steps.plan.outputs.title }}
+          STABLE_TAG: ${{ steps.plan.outputs.stable_version }}
+        run: |
+          python3 tools/.github/scripts/upstream_bump.py apply --repo addon
+
+          # Link C2gl's "New Tududi release available" issue, if there is one.
+          closes=""
+          if [ -n "$STABLE_TAG" ]; then
+            closes=$(gh issue list -R "$UPSTREAM_REPO" --state open --label upstream-release --json number,title \
+              --jq '[.[] | select(.title | endswith(env.STABLE_TAG))][0].number // empty' 2>/dev/null || true)
+          fi
+          python3 tools/.github/scripts/upstream_bump.py body --closes "$closes" > body.md
+
+          cd addon
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet -am "$TITLE" -m "Automated by the upstream-bump workflow in $FORK_REPO."
+          git --no-pager show --stat HEAD
+
+          if [ "$DRY_RUN" = true ]; then
+            echo "Dry run: would push $BRANCH and open a draft PR '$TITLE'." | tee -a "$GITHUB_STEP_SUMMARY"
+            git --no-pager diff HEAD~1
+            { echo; echo '<details><summary>PR body</summary>'; echo; cat ../body.md; echo; echo '</details>'; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git push --quiet origin "HEAD:refs/heads/$BRANCH"
+          url=$(gh pr create -R "$UPSTREAM_REPO" --base main --head "$FORK_OWNER:$BRANCH" \
+            --draft --title "$TITLE" --body-file ../body.md)
+          echo "Opened draft PR: $url" | tee -a "$GITHUB_STEP_SUMMARY"
