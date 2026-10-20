@@ -5,6 +5,7 @@
 #   1. fast-forwards fork `main` to C2gl `main` (never merges, never forces)
 #   2. if chrisvel/tududi has a newer tag than the addon pins, pushes
 #      pr/c2gl-bump-<version> with the mechanical bump and opens a draft PR to C2gl
+#   3. starts bump-check.yaml on that branch (smoke test + Claude upstream review)
 #
 # Needs secret FORK_SYNC_PAT: classic PAT of the fork owner, scopes public_repo + workflow.
 name: Upstream bump
@@ -60,10 +61,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api -X PUT "repos/$FORK_REPO/actions/workflows/upstream-bump.yaml/enable"
+          gh api -X PUT "repos/$FORK_REPO/actions/workflows/bump-check.yaml/enable"
           gh api "repos/$FORK_REPO/actions/workflows" --paginate \
             --jq '.workflows[] | select(.state == "active")
                   | select(.path | startswith(".github/workflows/"))
-                  | select(.path != ".github/workflows/upstream-bump.yaml") | "\(.id) \(.path)"' |
+                  | select(.path != ".github/workflows/upstream-bump.yaml")
+                  | select(.path != ".github/workflows/bump-check.yaml") | "\(.id) \(.path)"' |
           while read -r id path; do
             echo "Disabling $path"
             gh api -X PUT "repos/$FORK_REPO/actions/workflows/$id/disable" || true
@@ -165,3 +168,7 @@ jobs:
           url=$(gh pr create -R "$UPSTREAM_REPO" --base main --head "$FORK_OWNER:$BRANCH" \
             --draft --title "$TITLE" --body-file ../body.md)
           echo "Opened draft PR: $url" | tee -a "$GITHUB_STEP_SUMMARY"
+
+          # Smoke test + Claude upstream review of the new branch (results in that run's summary).
+          GH_TOKEN="${{ github.token }}" gh workflow run bump-check.yaml -R "$FORK_REPO" -f branch="$BRANCH" \
+            || echo "::warning::Could not start bump-check; run it by hand for $BRANCH"
