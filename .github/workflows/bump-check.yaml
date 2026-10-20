@@ -236,6 +236,13 @@ jobs:
             --disallowedTools "Bash,Edit,Write,WebFetch,WebSearch"
             --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["ok","issues"]},"review":{"type":"string"}},"required":["verdict","review"]}'
 
+      # The action hides Claude's output (public repo); print only the error text.
+      - name: Show Claude error
+        if: failure() && steps.claude.outcome == 'failure'
+        run: |
+          jq -r '.[] | select(.type == "result") | .result // empty' \
+            "$RUNNER_TEMP/claude-execution-output.json" 2>/dev/null || echo "no execution log"
+
       - name: Report
         env:
           RESULT: ${{ steps.claude.outputs.structured_output }}
